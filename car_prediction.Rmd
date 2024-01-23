@@ -1,0 +1,746 @@
+---
+title: "CS5801 Coursework Template Proforma"
+author: "2323609"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document: default
+  html_notebook: default
+version: 1
+---
+
+# 0. Instructions
+
+```{r}
+# Add code here to load all the required libraries with `library()`.  
+# Do not include any `install.package()` for any required packages in this rmd file.
+library(validate)
+library(tidyverse)
+library(Hmisc)
+library(ggplot2)
+library(tree)
+library(vcdExtra)
+library(ggmosaic)
+```
+
+# 1. Organise and clean the data
+
+## 1.1 Subset the data into the specific dataset allocated
+
+```{r}
+# Only change the value for SID 
+# Assign your student id into the variable SID, for example:
+SID <- 2323609                  # This is an example, replace 2101234 with your actual ID
+SIDoffset <- (SID %% 50) + 1    # Your SID mod 50 + 1
+
+load("car-analysis-data.Rda")
+# Now subset the car data set
+# Pick every 50th observation starting from your offset
+# Put into your data frame named mydf (you can rename it)
+mydata <- cars.analysis[seq(from=SIDoffset,to=nrow(cars.analysis),by=50),]
+```
+
+
+## 1.2 Data quality analysis plan
+First of all, we should see some rows of data to be familiar with data. After that by using str function we can see type of each variable in dataset. Next, summary function should be used to see details of each variable. In numerical variables, we can find out which variables has the potential to have implausible values by looking at the min and max each variable that can be outliers or errors, and also we can detect number of missing datas in each variable. Also most of the time binary variables are not interpreted accurately in R, so after detecting binary variables, they should be converted into factor. By using table function for categorical and binary variables, we can detect number of data that each category has, and also we can detect any error or implausible value in these variables. It is necessary to mention that in this dataset numerical variables such as year, engine_size, max_mpg, min_mpg should have value more than zero and mileage should not have negative value as it is not meaningful. Also, we should check the condition that value of max_mpg should be higher than min_mpg in each row.
+
+
+
+## 1.3 Data quality analysis findings
+
+```{r}
+# Visualize first rows of data
+head(mydata)
+
+# Visualize type of each variable
+str(mydata)
+```
+From output of str function we can see that type of year, mileage, engine_size, automatic_transmission, min_mpg, max_mpg, damaged, first_owner, navigation_system, bluetooth, third_row_seating, heated_seats and price are number and type of brand, fuel and drivetrain are character.
+
+```{r}
+summary(mydata)
+```
+From summary function we can detect that automatic_transmission, damaged, first_owner, navigation_system, bluetooth, third_row_seating and heated_seats are binary. So they should convert to factor. Also all of the numerical variables have non negative values except max_mpg.
+
+```{r}
+# Change type of binary variables to factor
+mydata$automatic_transmission<-as.factor(mydata$automatic_transmission)
+mydata$damaged<-as.factor(mydata$damaged)
+mydata$first_owner<-as.factor(mydata$first_owner)
+mydata$navigation_system<-as.factor(mydata$navigation_system)
+mydata$bluetooth<-as.factor(mydata$bluetooth)
+mydata$third_row_seating<-as.factor(mydata$third_row_seating)
+mydata$heated_seats<-as.factor(mydata$heated_seats)
+
+```
+
+
+```{r}
+# Number of data in each category of each categorical variable
+table(mydata$brand)
+table(mydata$automatic_transmission)
+table(mydata$fuel)
+table(mydata$drivetrain)
+table(mydata$damaged)
+table(mydata$first_owner)
+table(mydata$navigation_system)
+table(mydata$bluetooth)
+table(mydata$third_row_seating)
+table(mydata$heated_seats)
+```
+From the output of using table function we can see different categories of categorical variables and see that binary variables have only 0 or 1 value.
+
+```{r}
+# number of rows containing negative max_mpg variable
+neg_maxmpg<-nrow(subset(mydata, max_mpg<=0 & is.na(max_mpg)==FALSE ))
+paste("Number of rows containing negative max mpg: ", neg_maxmpg)
+
+# number of rows which have higher min_mpg than max_mpg
+higher_min<-nrow(subset(mydata, min_mpg>max_mpg))
+paste("Number of rows containing higher min mpg than max mpg:", higher_min)
+```
+
+## 1.4 Data cleaning
+
+there are 19 missing data in engine-size, 49 in min_mpg and max_mpg, 2 in damaged and 5 in first_owner. As there are considerable number of NA in min_mpg and max_mpg and engine_size,  we impute missing data in these variables with a random value in their range because random imputation doesn't reduce variability in comparison with imputation by median or mean. In engine_size, mean and median are approximately 3 but maximum value is 390, so 390 is an implausible and ridiculous value because it is much bigger than other values, so it should be deleted. In fuel and drivetrain there are 2 unknown data that these unknown data should be converted to NA, and in fuel 2 data are mistakenly pertol instead of petrol, so they should be changed to petrol. we should delete 5 rows which have non positive value in max_mpg, and 2 rows which have higher min_mpg than max_mpg, as these rows are not meaningful because mpg cannot have negative value and max should be bigger than min. Finally, as very few rows remain that have NA value, I decided to delete these rows to make my dataset cleaner.
+```{r}
+# Make a copy of our original data
+mydata2<-mydata
+
+# Delete data with engine_size= 390
+mydata2<- subset(mydata, engine_size !=390 | is.na(engine_size)==TRUE )
+
+# Delete data with higher min_mpg than max_mpg
+mydata2 <- subset(mydata2 , max_mpg>=min_mpg | is.na(max_mpg)==TRUE | is.na(min_mpg)==TRUE)
+
+# delete data with negative or zero value in max_mpg
+mydata2 <- subset(mydata2 , max_mpg>0 | is.na(max_mpg)==TRUE)
+```
+
+
+```{r}
+# Impute NA values in engine_size with random values in it's range
+set.seed(123)
+# get the range of engine size
+engine_size_range<-range(mydata2$engine_size, na.rm = TRUE)
+# imputation
+mydata2$engine_size[is.na(mydata2$engine_size)]=sample(seq(engine_size_range[1],engine_size_range[2], by=1), sum(is.na(mydata2$engine_size)),replace=TRUE)
+
+#impute NA values in min_mpg with random values in it's range
+# get the range of min_Mpg
+min_mpg_range<-range(mydata2$min_mpg, na.rm = TRUE)
+sample_min<-sample(seq(0,min_mpg_range[2], by=1), sum(is.na(mydata2$min_mpg)),replace=TRUE)
+mydata2$min_mpg[is.na(mydata2$min_mpg)]=sample_min
+
+#impute NA values in max_mpg with random values in it's range
+# to prevent imputing random lower max_mpg than min_mpg values, we add 7 to random values produced in min_mpg to get random values for max_mpg( 7 is difference of mean max_mpg and mean min_mpg in original datset). With this technique we are sure that random imputed max_mpg in each row is bigger than random imputed min_mpg.
+sample_max= sample_min + 7
+mydata2$max_mpg[is.na(mydata2$max_mpg)]=sample_max
+```
+
+
+```{r}
+
+# Convert Unknown datas in fuel and drivetrain to NA
+mydata2$fuel[mydata2$fuel=='Unknown']<-NA
+mydata2$drivetrain[mydata2$drivetrain=='Unknown']<-NA
+
+# Change 'Pertol' datas in fuel to 'Petrol'
+mydata2$fuel[mydata2$fuel=='Pertol'] <- 'Petrol'
+
+# delete rows containing NA
+mydata2<-mydata2[complete.cases(mydata2),]
+
+clean_data<-mydata2
+# Our final and cleaned data is clean_data
+
+
+```
+
+```{r}
+# Check the final and clean data
+summary(clean_data)
+```
+
+
+```{r}
+# check the final and clean data
+table(clean_data$brand)
+table(clean_data$automatic_transmission)
+table(clean_data$fuel)
+table(clean_data$drivetrain)
+table(clean_data$damaged)
+table(clean_data$first_owner)
+table(clean_data$navigation_system)
+table(clean_data$bluetooth)
+table(clean_data$third_row_seating)
+table(clean_data$heated_seats)
+
+
+```
+
+
+
+# 2. Exploratory Data Analysis (EDA)
+
+## 2.1 EDA plan
+
+To explore and visualize numerical data we can use ggplot library and plot histogram. By plotting histogram, we can see the distribution of data in each numerical variable which can be symmetric or skewed. Also, by histogram we can identify central tendency and range of data, and we can detect outliers as data points that have distance from the majority of the data. As brand and fuel are categorical variables, we can plot geom bars of these variables to see the number of cars from each brand and each fuel type. By plotting geom point of each numerical and categorical variable with dependent variable(price), the relation of the dependent variable with explanatory variables can be detected. Boxplot of binary and categorical variables can be plotted to detect the effect of different categories of each explanatory variable on dependent variable (price of car), and outliers can be detected by looking at the boxplot figures. When dependent variable is first_owner, we should use boxplot to plot numerical variables with first_owner. Moreover, we should use mosaic plot to plot categorical variables with first_owner.
+
+
+## 2.2 EDA execution
+
+In this part plots that are based on only one variable is plotted.
+```{r}
+# Histogram plot of year
+ggplot(clean_data, aes(x=year)) + 
+  # Histogram of count on y-axis  
+  geom_histogram(   
+                 binwidth=1,
+                 colour="black", fill="grey") +
+  xlab("Year of car production") +
+  ggtitle("Histogram of year of car production") +
+  scale_x_continuous(breaks = c(1985,1990,1995,2000,2005,2010,2015,2020,2024))
+```
+
+
+```{r}
+# Histogram plot of mileage
+# for better visualization I plot Kiloo miles
+ggplot(clean_data, aes(x=mileage/1000)) + 
+  # Histogram of count on y-axis  
+  geom_histogram(   
+                 binwidth=1,
+                 colour="black", fill="grey") +
+  xlab("Kmileage") +
+  ggtitle("Histogram of mileage")
+```
+
+
+```{r}
+# Histogram plot of engine size
+ggplot(clean_data, aes(x=engine_size)) + 
+  # Histogram of count on y-axis  
+  geom_histogram(   
+                 binwidth=1,
+                 colour="black", fill="grey") +
+  xlab("engine size") +
+  ggtitle("Histogram of size of engine")+
+  scale_x_continuous()
+```
+
+
+```{r}
+# Histogram plot of min mpg
+ggplot(clean_data, aes(x=min_mpg)) + 
+  # Histogram of count on y-axis  
+  geom_histogram(   
+                 binwidth=1,
+                 colour="black", fill="grey") +
+  xlab("min of mpg") +
+  ggtitle("Histogram of min of mpg")+
+  scale_x_continuous(breaks=c(0,10,20,30,40,50))
+```
+
+
+```{r}
+# Histogram plot of max mpg
+ggplot(clean_data, aes(x=max_mpg)) + 
+  # Histogram of count on y-axis  
+  geom_histogram(   
+                 binwidth=1,
+                 colour="black", fill="grey") +
+  xlab("max of mpg") +
+  ggtitle("Histogram of max of mpg")+
+  scale_x_continuous()
+```
+
+
+```{r}
+# Bar plot of brand of cars
+ggplot(data=clean_data, 
+       aes(x = factor(brand))) +
+  geom_bar() + 
+  ggtitle("Barplot of number of cars for each brand") +
+  xlab("brand cars") +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+
+```{r}
+# Bar plot of fuel of cars
+ggplot(data=clean_data, 
+       aes(x = factor(fuel))) +
+  geom_bar() + 
+  ggtitle("Barplot of number of cars with each type of fuel") +
+  xlab("fuel") +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+In this part scatter plots of price and explanatory variables are plotted. Also, one scatter plot of max and min mpg is plotted to see their correlation because it seems they can be strongly correlated.
+```{r}
+# geom_point plot of year and price
+ggplot(data = clean_data,
+       aes(x = year , y = price)) +
+       geom_point() +
+       ggtitle(" point plot of year and price") +
+       xlab("year") +
+       ylab("price")
+```
+
+
+```{r}
+# geom_point plot of mileage and price
+ggplot(data = clean_data,
+       aes(x = mileage , y = price)) +
+       geom_point() +
+       ggtitle(" point plot of mileage and price") +
+       xlab("mileage") +
+       ylab("price")
+```
+
+
+```{r}
+# geom_point plot of engine size and price
+ggplot(data = clean_data,
+       aes(x = engine_size , y = price)) +
+       geom_point() +
+       ggtitle(" point plot of engine size and price") +
+       xlab("engine size") +
+       ylab("price") +
+       scale_x_continuous()
+```
+
+
+```{r}
+# geom_point plot of min_mpg and price
+ggplot(data = clean_data,
+       aes(x = min_mpg , y = price)) +
+       geom_point() +
+       ggtitle(" point plot of min mpg and price") +
+       xlab("min mpg") +
+       ylab("price") +
+       scale_x_continuous()
+```
+
+
+```{r}
+# geom_point plot of max_mpg and price
+ggplot(data = clean_data,
+       aes(x = max_mpg , y = price)) +
+       geom_point() +
+       ggtitle(" point plot of max mpg and price") +
+       xlab("max mpg") +
+       ylab("price") +
+       scale_x_continuous()
+```
+
+
+```{r}
+# plot numerical variables all in one
+pairs(clean_data[,c("year","mileage","engine_size","min_mpg","max_mpg","price")])
+```
+
+
+```{r}
+# geom_point plot of max_mpg and min_mpg
+ggplot(data = clean_data,
+       aes(x = max_mpg , y = min_mpg)) +
+       geom_point() +
+       ggtitle(" point plot of max mpg and min mpg") +
+       xlab("max mpg") +
+       ylab("min_mpg") +
+       scale_x_continuous()
+```
+In this parts boxplots of price and explanatory variables are plotted.
+```{r}
+# box plot of automatic transmission
+ggplot(data=clean_data,
+       aes(x = automatic_transmission , y = price , fill = automatic_transmission)) +
+       geom_boxplot() +
+       ggtitle("boxplot of price categorized by  automatic transmission") +
+       xlab("automatic transmission") +
+       ylab("price") +
+       labs(fill="automatic transmission") +
+       scale_fill_manual(values = c("red","blue") , labels=c("no" , "yes")) +
+       theme(legend.position = 'right')
+```
+
+
+```{r}
+# box plot of drivetrain
+ggplot(data=clean_data,
+       aes(x = drivetrain , y = price , fill = drivetrain)) +
+       geom_boxplot() +
+       ggtitle("boxplot of price categorized by drivetrain") +
+       xlab("drivetrain") +
+       ylab("price") +
+       labs(fill="drivetrain") +
+       theme(legend.position = 'right')
+```
+
+
+```{r}
+# box plot of fuel
+ggplot(data=clean_data,
+       aes(x = fuel , y = price , fill = fuel)) +
+       geom_boxplot() +
+       ggtitle("boxplot of price categorized by fuel") +
+       xlab("fuel") +
+       ylab("price") +
+       labs(fill="fuel") +
+       theme(legend.position = 'right')
+```
+
+
+```{r}
+# box plot of brand
+ggplot(data=clean_data,
+       aes(x = brand , y = price , fill = brand)) +
+       geom_boxplot() +
+       ggtitle("boxplot of price categorized by brand") +
+       xlab("brand") +
+       ylab("price") +
+       labs(fill="brand") +
+       theme(legend.position = 'right') +
+  theme(axis.text.x = element_text(angle = 90 , size = 6))
+```
+
+
+```{r}
+# box plot of damaged
+ggplot(data=clean_data,
+       aes(x = damaged , y = price , fill = damaged)) +
+       geom_boxplot() +
+       ggtitle("boxplot of price categorized by damaged") +
+       xlab("damaged") +
+       ylab("price") +
+       labs(fill="damaged") +
+       scale_fill_manual(values = c("red","blue") , labels=c("no" , "yes")) +
+       theme(legend.position = 'right')
+```
+
+
+```{r}
+# box plot of first owner
+ggplot(data=clean_data,
+       aes(x = first_owner , y = price , fill = first_owner)) +
+       geom_boxplot() +
+       ggtitle("boxplot of price categorized by first owner") +
+       xlab("first owner") +
+       ylab("price") +
+       labs(fill="first owner") +
+       scale_fill_manual(values = c("red","blue") , labels=c("no" , "yes")) +
+       theme(legend.position = 'right')
+```
+
+
+```{r}
+# box plot of navigation system
+ggplot(data=clean_data,
+       aes(x = navigation_system , y = price , fill = navigation_system)) +
+       geom_boxplot() +
+       ggtitle("boxplot of price categorized by navigation system") +
+       xlab("navigation system") +
+       ylab("price") +
+       labs(fill="navigation system") +
+       scale_fill_manual(values = c("red","blue") , labels=c("no" , "yes")) +
+       theme(legend.position = 'right')
+```
+
+
+```{r}
+# box plot of bluetooth
+ggplot(data=clean_data,
+       aes(x = bluetooth , y = price , fill = bluetooth)) +
+       geom_boxplot() +
+       ggtitle("boxplot of price categorized by bluetooth") +
+       xlab("bluetooth") +
+       ylab("price") +
+       labs(fill="bluetooth") +
+       scale_fill_manual(values = c("red","blue") , labels=c("no" , "yes")) +
+       theme(legend.position = 'right')
+```
+
+
+```{r}
+# box plot of third row seating
+ggplot(data=clean_data,
+       aes(x = third_row_seating , y = price , fill = third_row_seating)) +
+       geom_boxplot() +
+       ggtitle("boxplot of price categorized by third row seating") +
+       xlab("third row seating") +
+       ylab("price") +
+       labs(fill="third row seating") +
+       scale_fill_manual(values = c("red","blue") , labels=c("no" , "yes")) +
+       theme(legend.position = 'right')
+```
+
+
+```{r}
+# box plot of heated seat
+ggplot(data=clean_data,
+       aes(x = heated_seats , y = price , fill = heated_seats)) +
+       geom_boxplot() +
+       ggtitle("boxplot of price categorized by heated seats") +
+       xlab("heated seats") +
+       ylab("price") +
+       labs(fill="heated seats") +
+       scale_fill_manual(values = c("red","blue") , labels=c("no" , "yes")) +
+       theme(legend.position = 'right')
+```
+In this part boxplots of first owner as dependent variable and other explanatory variables are plotted.
+
+```{r}
+# box plot of first owner and price
+ggplot(data=clean_data,
+       aes(x = first_owner , y = price , fill = first_owner)) +
+       geom_boxplot() +
+       ggtitle("boxplot of price and first owner") +
+       xlab("first owner") +
+       ylab("price") +
+       labs(fill="first owner") +
+       scale_fill_manual(values = c("red","blue") , labels=c("no" , "yes")) +
+       theme(legend.position = 'right')
+```
+
+
+```{r}
+# box plot of first owner and year
+ggplot(data=clean_data,
+       aes(x = first_owner , y = year , fill = first_owner)) +
+       geom_boxplot() +
+       ggtitle("boxplot of year and first owner") +
+       xlab("first owner") +
+       ylab("year") +
+       labs(fill="first owner") +
+       scale_fill_manual(values = c("red","blue") , labels=c("no" , "yes")) +
+       theme(legend.position = 'right')
+```
+
+
+```{r}
+# box plot of first owner and mileage
+ggplot(data=clean_data,
+       aes(x = first_owner , y = mileage , fill = first_owner)) +
+       geom_boxplot() +
+       ggtitle("boxplot of mileage and first owner") +
+       xlab("first owner") +
+       ylab("mileage") +
+       labs(fill="first owner") +
+       scale_fill_manual(values = c("red","blue") , labels=c("no" , "yes")) +
+       theme(legend.position = 'right')
+```
+
+
+```{r}
+# box plot of engine_size and first_owner
+ggplot(data=clean_data,
+       aes(x = first_owner , y = engine_size , fill = first_owner)) +
+       geom_boxplot() +
+       ggtitle("boxplot of engine_size and first owner") +
+       xlab("first owner") +
+       ylab("engine size") +
+       labs(fill="first owner") +
+       scale_fill_manual(values = c("red","blue") , labels=c("no" , "yes")) +
+       theme(legend.position = 'right')
+```
+
+
+```{r}
+# box plot of first owner and min mpg
+ggplot(data=clean_data,
+       aes(x = first_owner , y = min_mpg , fill = first_owner)) +
+       geom_boxplot() +
+       ggtitle("boxplot of min_mpg and first owner") +
+       xlab("first owner") +
+       ylab("min_mpg") +
+       labs(fill="first owner") +
+       scale_fill_manual(values = c("red","blue") , labels=c("no" , "yes")) +
+       theme(legend.position = 'right')
+```
+
+
+```{r}
+# box plot of first owner and max_mpg
+ggplot(data=clean_data,
+       aes(x = first_owner , y = max_mpg , fill = first_owner)) +
+       geom_boxplot() +
+       ggtitle("boxplot of max mpg and first owner") +
+       xlab("first owner") +
+       ylab("max mpg") +
+       labs(fill="first owner") +
+       scale_fill_manual(values = c("red","blue") , labels=c("no" , "yes")) +
+       theme(legend.position = 'right')
+```
+In this part mosaic plots of first_owner and categorical explanatory variables are plotted.
+```{r}
+# musaicplot of bluetooth and first owner
+mosaicplot(~bluetooth+first_owner, data=clean_data, color=TRUE)
+```
+
+
+```{r}
+# musaicplot of automatic transmission and first owner
+mosaicplot(~automatic_transmission+first_owner, data=clean_data, color=TRUE)
+```
+
+
+```{r}
+# musaicplot of drivetrain and first owner
+mosaicplot(~drivetrain+first_owner, data=clean_data, color=TRUE)
+```
+
+
+```{r}
+# musaicplot of damaged and first owner
+mosaicplot(~damaged+first_owner, data=clean_data, color=TRUE)
+```
+
+
+```{r}
+# musaicplot of navigation system and first owner
+mosaicplot(~navigation_system+first_owner, data=clean_data, color=TRUE)
+```
+
+
+```{r}
+# musaicplot of third row seating and first owner
+mosaicplot(~third_row_seating+first_owner, data=clean_data, color=TRUE)
+```
+
+
+```{r}
+# musaicplot of heated seats and first owner
+mosaicplot(~heated_seats+first_owner, data=clean_data, color=TRUE)
+```
+
+
+
+## 2.3 EDA summary of results
+
+From the histograms we can see that none of the explanatory variables are normally distributed.
+As can be seen in the point plots, year and price have positive relation, as higher values of year correspond to higher values of price. But mileage and price have negative relation, as lower values of mileage correspond to higher values of price. There isn't any specific and visible relation between price with engine size, min mpg and max mpg. From the boxplots of price we can observe that automatic transmission is highly effective on the price of car as these two categories have different price ranges and median values. Moreover, drivetrain and fuel are extremely effective on the price as different categories have different range of price and median value. From the boxplots of damaged, first owner, third row seating and heated seats we can detect that these variables are moderately effective as their categories have little difference in their range but they have different median value. Also, navigation system in the car is highly effective on its price as different categories have different range and different median value. But bluetooth is slightly effective on the price as different categories have roughly same range and median value. 
+
+By considering first_owner as dependent variable, in the boxplots we can see that year,price, mileage are effective on first_owner. But engine_size, max_mpg, min_mpg are less effective on first_owner as different categories of first_owner have approximately same ranges in these variables. From mosaic plots it can be concluded that automatic_transmission, damaged, drivetrain, and third_row_seating are highly effective on first_owner because different categories of these variables might result in different category of first_owner. But bluetooth, navigation_system, and heated_seats are less effective on first_owner.
+
+## 2.4 Additional insights and issues
+
+By looking at the boxplots of price, we can see that there are some outliers in automatic transmission, drivetrain,brand, and navigation system. values of these data are meaningful and can be realistic, so we don't recognize them as errors or implausible values and we keep them in our dataset. In the pairs plot of numerical variables none of the explanatory numerical variables seem correlated except min_mpg and max_mpg. For more comprehensive view, point plot of max_mpg and min_mpg are plotted individually. in the scatter plot of max mpg and min mpg it is visible that these two variables have positive relation and they are considerably correlated.
+
+By considering plots of first_owner, we can see that in the boxplots there are some outliers. But, we don't define them as error because they have meaningful values. Moreover, from automatic_transmission plot we can see that the most of the cars that don't have automatic_transmission are not first_owner.
+
+
+# 3. Modelling
+
+## 3.1 Explain your analysis plan
+
+For detecting the amount of correlation between variables cor function can be used. Considering output of cor function in the below, price is more correlated with year, mileage, automatic transmission, navigation system, and first owner in comparison with other numerical and binary variables. These correlations was detected in part 2.3 by observing geom point plots and boxplots, and output of cor function is a proof for observations and interpretations of part 2.3 . It is visible in the tree that year, engine_size, navigation system are correlated variables to price as they are in the upper parts of the tree. Also one considerable notice is that in the result of cor function max mpg and min mpg has 0.95 correlation and cor test of these two variables show that they have correlation, so it shows multi-collinearity and it shows that we can use only one of these variables in our model. Hence, The variable can be max mpg because it's correlation with price is more than min_mpg correlation with price.
+```{r}
+# Correlation between numerical variables and price(dependent variable)
+clean_data_num <- subset(clean_data, select = c(year , mileage , engine_size , min_mpg
+                                                , max_mpg , price))
+cor(clean_data_num)
+cor.test(clean_data$max_mpg,clean_data$min_mpg)
+```
+
+
+```{r}
+# Correlation between binary variables and price(dependent variable)
+at_num<-data.frame(as.numeric(clean_data$automatic_transmission))
+damaged_num<-data.frame(as.numeric(clean_data$damaged))
+first_owner_num<- data.frame(as.numeric(clean_data$first_owner))
+ns_num<-data.frame(as.numeric(clean_data$navigation_system))
+bl_num<-data.frame(as.numeric(clean_data$bluetooth))
+trs_num<-data.frame(as.numeric(clean_data$third_row_seating))
+hs_num<-data.frame(as.numeric(clean_data$heated_seats))
+clean_data_cat<- cbind.data.frame(at_num,damaged_num,first_owner_num,
+                                      ns_num,bl_num,trs_num,hs_num,clean_data$price)
+colnames(clean_data_cat)<-c("automatic_transmission" , "damaged" , "first_owner" , "navigation_system" , "bluetooth" , "third_row_seating" , "heated_seats" , "price" )
+cor(clean_data_cat, use = "pairwise.complete.obs")
+```
+```{r}
+car.tree<-tree(clean_data$price~., data = clean_data)
+plot(car.tree)
+text(car.tree)
+```
+
+
+
+
+## 3.2 Build a model for car price
+
+Initially, a complex model is built that has all of the numerical and categorical variables except min_mpg, because as mentioned in the previous parts min_mpg is highly correlated with max_mpg and because of multi-collinearity it's better to dont use min_mpg in model. First model is too complex and should become simple. It is hard to make it simple manually, so step function should be used to make the model simple.
+
+```{r}
+model1<-lm(price~year+mileage+engine_size+max_mpg+
+             brand+damaged+first_owner+navigation_system+bluetooth+third_row_seating+heated_seats , data=clean_data)
+summary(model1)
+```
+
+
+```{r}
+model2<-step(model1)
+summary(model2)
+
+```
+
+
+## 3.3 Critique model using relevant diagnostics
+
+
+```{r}
+summary(model2)
+plot(model2)
+```
+
+From the model that step function provided, we can conclude that year, engine_size, some brands, first_owner, navigation_system and third-row-seating have positive effect on price but mileage, damaged, and some brands have negative impact on price. As can be seen in the summary of the model that step function provided, it's R squared is roughly 0.79 means that this model predicted 79 percentage of variance of data appropriately, which is a proper number. Also it's P-value and coefficients are significant. By considering plots of the model, we can see equal variances in the residuals vs fitted plot and points are distributed randomly which shows that our model is appropriate. But There are few outliers in residual vs fitted plot. Moreover most of the residuals are along the straight line in the Q-Q residuals plot. But a slight S-shape pattern can be seen in the Q-Q plot. In summary, high value of R-squared and interpretations of the plots show that our model is appropriate and accurate model but maybe some changes in the model can improve our model.
+
+## 3.4 Suggest and implement improvements to your model
+```{r}
+model3<-lm(log(price)~year+mileage+engine_size+max_mpg+
+             brand+damaged+first_owner+navigation_system+bluetooth+third_row_seating+heated_seats , data=clean_data)
+model4<-step(model3)
+summary(model4)
+plot(model4)
+```
+To reduce weaknesses of the model developed in part 3.2, a new model is articulated. In the new model log of the dependent variable(price) is used and all of the other properties of the model is as same as old model. After making new model, step function is used to make it simple. From the output of summary of new model we can see that multiple R-squared is 0.82 which increased approximately 0.03 in comparison with old model. Also it's p-value and coefficients are significant. By considering plots of the new model, we can see that points are distributed normally in residuals vs fitted plot and there is equal variance in this plot. Also in the Q-Q plot we can see that most of the points are along the straight line, but there are few outliers in both Q-Q  and residuals vs fitted plots. In summary, both models have appropriate R-squared value and their plots don't show major issues, so both models are appropriate but as new model has higher R-squared value, I prefer and propose new model that uses log price(dependent variable).
+
+
+# 4. Modelling another dependent variable
+
+## 4.1 Model the likelihood of a car being sold by the first owner (using the first_owner variable provided).
+
+Based on the EDA in part 2, year, price, mileage, automatic_transmission, damaged, drivetrain, and third_row_seating are more effective on first_owner than other variables. However, I use all of the explanatory variables for my initial model to make a comprehensive model. In this part the dependent variable is first_owner which is a binary variable. So for the model we should use logistic regression. 
+
+
+```{r}
+model_glm<-glm(data=clean_data, first_owner~price+year+mileage+engine_size+max_mpg+
+             brand+damaged+navigation_system+bluetooth+third_row_seating+heated_seats, family = binomial)
+summary(model_glm)
+```
+After making initial model, I use step function to make my model simple.
+```{r}
+model_glm2<-step(model_glm)
+summary(model_glm2)
+```
+From the output of summary, we can see that all of the remaining explanatory variables have small p_value, so they are significant. year, heated seats, engine_size are more significant than mileage and third_row_seating. Also AIC is equal to 393.24, which is an appropriate number.
+In the next part, I calculate the odd ratios of variables to figure out effect of each explanatory variable on first_owner.
+```{r}
+exp(coef(model_glm2))
+```
+From this output we can conclude that, by one unit increase in the year, the odds of first_owner increase by a factor of 1.495. Also, by one unit increase in the engine_size and heated seats, the odds of first_owner decrease by a factor of 0.76 and 0.44 respectively. By one unit increase in third_row_seating, the odds of first_owner increase by a factor of 2.076, which is a considerable amount. Interestingly, by one unit increase in mileage, the odds of first_owner decrease by a factor of 0.9999, which shows that in this model mileage is not very effective on first_owner. In summary, year and having third_row_seating increase likelihood of being first_owner, but engine_size, having heated_seats, and mileage decrease likelihood of being first_owner.
+
+In the next part, I will test another model to compare the performance of the models.
+```{r}
+model_glm3<-glm(data=clean_data, first_owner~I(price^2)+I(year^2)+I(mileage^2)+I(engine_size^2)+I(max_mpg^2)+
+             brand+damaged+navigation_system+bluetooth+third_row_seating+heated_seats, family = binomial)
+model_glm4<-step(model_glm3)
+summary(model_glm4)
+```
+We can see that in the second model AIC is equal to 395.36 which is more than the AIC of the first model, so in this measurement first model is better than second one. Moreover, second model has more residual deviance than the first one, which shows that first model has better performance in this measurement. So the first model is better than second one because it is more simple and it has less AIC, residual deviance.
+
+# References
+
+https://bookdown.org/kochiuyu/Technical-Analysis-with-R/random-number.html
+https://www.digitalocean.com/community/tutorials/generating-a-sequence-in-r
+
